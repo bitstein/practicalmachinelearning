@@ -1,0 +1,146 @@
+---
+title: "Practical Machine Learning"
+output: html_document
+---
+
+## Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+## Data
+
+The training data for this project are available here: 
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here: 
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har.
+
+## Load Data
+
+First the caret package and data are loaded. A seed is also set.
+
+```{r echo = TRUE, warning=FALSE}
+library(caret)
+
+training <- read.csv("pml-training.csv", na.strings=c("NA", ""))
+testing <- read.csv("pml-testing.csv", na.strings=c("NA", ""))
+set.seed(100)
+```
+
+The first 7 columns of the data are irrelevant and are thus removed.
+
+```{r echo = TRUE, warning=FALSE}
+training <- training[,-c(1:7)]
+testing <- testing[,-c(1:7)]
+```
+
+Columns that have a near zero variance are not helpful for modeling, so these are removed as well.
+
+```{r echo = TRUE, warning=FALSE}
+nzv <- nearZeroVar(training)
+training <- training[, -nzv]
+testing <- testing[,-nzv]
+```
+
+Many columns are mostly populated with NA values, which are also unhelpful. These columns are removed.
+
+```{r echo = TRUE, warning=FALSE}
+NAs <- apply(training,2,function(x) {sum(is.na(x))}) 
+training <- training[,which(NAs == 0)]
+testing <- testing[,which(NAs == 0)]
+```
+
+The data is then partitioned: 60% for training and 40% for testing.
+
+```{r echo = TRUE, warning=FALSE}
+part <- createDataPartition(y = training$classe, p=0.4,list=FALSE) 
+training.sub <- training[part,]
+training.test <- training[-part,]
+```
+
+## Create a Model
+
+The first attempted model is a classification model using rpart.
+
+```{r echo = TRUE, warning=FALSE}
+classModel <- train(classe ~.,data = training.sub,method="rpart")
+print(classModel)
+
+results <- classModel$results
+round(max(results$Accuracy),4)*100
+```
+
+The accuracy is rather low at `r round(max(results$Accuracy),4)*100` %, so we will try something else.
+
+## Random Forest
+
+Next, a random forest model is tried.
+```{r echo = TRUE, warning=FALSE}
+ctrl   <- trainControl(method = "cv", number = 4, allowParallel = TRUE)
+rfModel <- train(classe ~.,data = training.sub,method="rf",prof=TRUE, trControl = ctrl)
+#rfModel <- train(classe ~.,data = training.sub,method="rf",                trControl = trainControl(method = "cv", number = 4,allowParallel=TRUE),
+#                ,prof=TRUE)
+print(rfModel)
+
+results <- rfModel$results
+round(max(results$Accuracy),4)*100
+```
+
+This model is much more accurate, at `r round(max(results$Accuracy),4)*100` %.
+
+## Cross-validation
+
+We can use the random forest model the values in the test set we partitioned earlier.
+
+```{r echo = TRUE, warning=FALSE}
+pred <- predict(rfModel,training.test)
+training.test$predRight <- pred==training.test$classe
+table(pred, training.test$classe)
+```
+
+The accuracy is calculated below:
+
+```{r echo = TRUE, warning=FALSE}
+pRes <- postResample(pred, training.test$classe)
+print(pRes)
+```
+
+Or, `r round(pRes[1],6)*100` %
+
+### Expected Out of Sample Error
+
+The expected out of sample error can be calculated using a confusion matrix based on the test set.
+
+```{r echo = TRUE, warning=FALSE}
+cfM <- confusionMatrix(pred, training.test$classe)
+print(cfM)
+```
+
+We get an out of sample error of:
+
+```{r echo = TRUE, warning=FALSE}
+round((1 - cfM$overall[1]),6)
+```
+
+Or, `r 100 * round((1 - cfM$overall[1]),6)` %. With this accuracy of just over 98%, we can expect 0 or 1 samples to likely be incorrect.
+
+## Final Predictions and Submission
+
+```{r echo = TRUE, warning=FALSE}
+predict <- predict(rfModel, testing)
+print(predict)
+
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("answers/problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+
+pml_write_files(predict)
+```
